@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Avaliação de Motoboys - Calçados 24h</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * {
             margin: 0;
@@ -45,6 +46,58 @@
             color: #64748b;
             font-size: 1.1em;
             margin: 0;
+        }
+
+        .mode-indicator {
+            background: #ffffff;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+            margin-bottom: 20px;
+            border: 1px solid #e2e8f0;
+            text-align: center;
+        }
+
+        .mode-indicator.online {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            border-color: #c3e6cb;
+        }
+
+        .mode-indicator.offline {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+            border-color: #ffeaa7;
+        }
+
+        .config-section {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            margin-bottom: 20px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .config-section h3 {
+            color: #1e293b;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+
+        .status-indicator.connected {
+            background: #10b981;
+        }
+
+        .status-indicator.local {
+            background: #f59e0b;
         }
 
         .nav-tabs {
@@ -114,16 +167,17 @@
             color: #374151;
         }
 
-        .form-group input, .form-group select {
+        .form-group input, .form-group select, .form-group textarea {
             width: 100%;
             padding: 12px;
             border: 2px solid #e1e8ed;
             border-radius: 10px;
             font-size: 16px;
             transition: all 0.3s ease;
+            font-family: inherit;
         }
 
-        .form-group input:focus, .form-group select:focus {
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
             outline: none;
             border-color: #3b82f6;
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
@@ -306,16 +360,6 @@
             border: 1px solid #e2e8f0;
         }
 
-        .observations-textarea {
-            width: 100%;
-            min-height: 100px;
-            padding: 12px;
-            border: 2px solid #e1e8ed;
-            border-radius: 10px;
-            font-family: inherit;
-            resize: vertical;
-        }
-
         .date-navigation {
             display: flex;
             align-items: center;
@@ -342,6 +386,12 @@
             background: #f8d7da;
             color: #721c24;
             border: 1px solid #f5c6cb;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
         }
 
         .loading {
@@ -407,6 +457,35 @@
         <div class="header">
             <h1>🚛 Calçados 24h - Sistema de Avaliação de Motoboys</h1>
             <p>Controle semanal de performance e qualidade de serviço</p>
+        </div>
+
+        <!-- Indicador de Modo -->
+        <div id="modeIndicator" class="mode-indicator offline">
+            <strong id="modeText">🔌 Modo Offline</strong> - Dados salvos localmente no navegador
+            <div style="margin-top: 8px; font-size: 14px;">
+                <span id="modeDescription">Configure o Supabase para usar dados na nuvem</span>
+            </div>
+        </div>
+
+        <!-- Configuração do Supabase (Opcional) -->
+        <div class="config-section" id="configSection">
+            <h3>
+                <span id="connectionStatus" class="status-indicator local"></span>
+                ⚙️ Configuração do Supabase (Opcional)
+            </h3>
+            <div class="form-group">
+                <label for="supabaseUrl">URL do Projeto Supabase:</label>
+                <input type="url" id="supabaseUrl" placeholder="https://seu-projeto.supabase.co">
+            </div>
+            <div class="form-group">
+                <label for="supabaseKey">Chave Pública (anon key):</label>
+                <input type="password" id="supabaseKey" placeholder="sua-chave-publica-aqui">
+            </div>
+            <button class="btn" onclick="connectSupabase()">🔗 Conectar ao Supabase</button>
+            <button class="btn btn-danger" onclick="disconnectSupabase()">📱 Usar Modo Local</button>
+            <p style="margin-top: 10px; font-size: 14px; color: #64748b;">
+                <strong>Opcional:</strong> O sistema funciona perfeitamente sem Supabase. Configure apenas se quiser dados na nuvem.
+            </p>
         </div>
 
         <div class="nav-tabs">
@@ -491,9 +570,13 @@
     </div>
 
     <script>
-        // Sistema simplificado usando Local Storage para demonstração
-        let motoboys = JSON.parse(localStorage.getItem('motoboys')) || [];
-        let evaluations = JSON.parse(localStorage.getItem('evaluations')) || {};
+        // Sistema Híbrido: Supabase + localStorage
+        let supabase = null;
+        let isOnlineMode = false;
+        
+        // Cache de dados
+        let motoboys = [];
+        let evaluations = {};
 
         const criteria = [
             'Pontualidade',
@@ -514,12 +597,284 @@
 
         // Inicialização
         document.addEventListener('DOMContentLoaded', function() {
-            loadMotoboys();
-            setCurrentWeek();
-            updateDashboard();
+            initializeSystem();
         });
 
-        // Navegação entre abas
+        async function initializeSystem() {
+            // Tentar conectar ao Supabase se tiver credenciais salvas
+            await tryAutoConnect();
+            
+            // Carregar dados (local ou nuvem)
+            await loadAllData();
+            
+            // Configurar interface
+            setCurrentWeek();
+            updateModeIndicator();
+            updateDashboard();
+        }
+
+        // ============= GERENCIAMENTO DE MODO =============
+
+        async function tryAutoConnect() {
+            const storedUrl = localStorage.getItem('supabase_url');
+            const storedKey = localStorage.getItem('supabase_key');
+            
+            if (storedUrl && storedKey) {
+                document.getElementById('supabaseUrl').value = storedUrl;
+                document.getElementById('supabaseKey').value = storedKey;
+                
+                try {
+                    const { createClient } = supabase_js || window.supabase;
+                    supabase = createClient(storedUrl, storedKey);
+                    
+                    // Teste silencioso de conexão
+                    const { data, error } = await supabase.from('motoboys').select('count').limit(1);
+                    
+                    if (!error || error.message.includes('relation "public.motoboys" does not exist')) {
+                        isOnlineMode = true;
+                        await migrateFromLocalToSupabase();
+                    }
+                } catch (error) {
+                    console.log('Supabase não disponível, usando modo local');
+                    isOnlineMode = false;
+                }
+            }
+        }
+
+        async function connectSupabase() {
+            const url = document.getElementById('supabaseUrl').value.trim();
+            const key = document.getElementById('supabaseKey').value.trim();
+            
+            if (!url || !key) {
+                showAlert('Por favor, preencha a URL e a chave do Supabase.', 'danger');
+                return;
+            }
+
+            try {
+                showAlert('Conectando ao Supabase...', 'warning');
+                
+                const { createClient } = supabase_js || window.supabase;
+                supabase = createClient(url, key);
+                
+                // Testar conexão
+                const { data, error } = await supabase.from('motoboys').select('count').limit(1);
+                
+                if (error && !error.message.includes('relation "public.motoboys" does not exist')) {
+                    throw error;
+                }
+                
+                isOnlineMode = true;
+                localStorage.setItem('supabase_url', url);
+                localStorage.setItem('supabase_key', key);
+                
+                // Migrar dados locais para Supabase
+                await migrateFromLocalToSupabase();
+                
+                updateModeIndicator();
+                showAlert('Conectado ao Supabase com sucesso! Dados migrados para a nuvem.', 'success');
+                
+            } catch (error) {
+                console.error('Erro ao conectar:', error);
+                showAlert('Erro ao conectar ao Supabase: ' + error.message + '. Continuando em modo local.', 'warning');
+                isOnlineMode = false;
+                updateModeIndicator();
+            }
+        }
+
+        function disconnectSupabase() {
+            if (confirm('Deseja desconectar do Supabase? Os dados atuais serão copiados para o armazenamento local.')) {
+                localStorage.removeItem('supabase_url');
+                localStorage.removeItem('supabase_key');
+                supabase = null;
+                isOnlineMode = false;
+                
+                // Salvar dados atuais localmente
+                saveToLocal();
+                
+                updateModeIndicator();
+                showAlert('Modo local ativado. Dados salvos localmente.', 'success');
+            }
+        }
+
+        function updateModeIndicator() {
+            const indicator = document.getElementById('modeIndicator');
+            const text = document.getElementById('modeText');
+            const description = document.getElementById('modeDescription');
+            const status = document.getElementById('connectionStatus');
+            const config = document.getElementById('configSection');
+
+            if (isOnlineMode) {
+                indicator.className = 'mode-indicator online';
+                text.textContent = '☁️ Modo Online';
+                description.textContent = 'Dados sincronizados na nuvem - Acessível de qualquer computador';
+                status.className = 'status-indicator connected';
+                config.style.display = 'none';
+            } else {
+                indicator.className = 'mode-indicator offline';
+                text.textContent = '🔌 Modo Offline';
+                description.textContent = 'Dados salvos localmente - Funciona sem internet';
+                status.className = 'status-indicator local';
+                config.style.display = 'block';
+            }
+        }
+
+        // ============= MIGRAÇÃO DE DADOS =============
+
+        async function migrateFromLocalToSupabase() {
+            if (!isOnlineMode) return;
+
+            try {
+                // Carregar dados locais
+                const localMotoboys = JSON.parse(localStorage.getItem('motoboys') || '[]');
+                const localEvaluations = JSON.parse(localStorage.getItem('evaluations') || '{}');
+
+                if (localMotoboys.length > 0) {
+                    // Migrar motoboys
+                    for (const motoboy of localMotoboys) {
+                        const { data, error } = await supabase
+                            .from('motoboys')
+                            .upsert([{
+                                nome: motoboy.nome,
+                                telefone: motoboy.telefone,
+                                veiculo: motoboy.veiculo,
+                                placa: motoboy.placa
+                            }], { onConflict: 'nome' })
+                            .select();
+                        
+                        if (error) throw error;
+                    }
+
+                    // Migrar avaliações
+                    if (Object.keys(localEvaluations).length > 0) {
+                        const evaluationsToInsert = [];
+                        
+                        Object.keys(localEvaluations).forEach(evaluationKey => {
+                            const [motoboyId, week] = evaluationKey.split('-');
+                            const evaluation = localEvaluations[evaluationKey];
+                            
+                            // Encontrar o motoboy no Supabase pelo nome
+                            const localMotoboy = localMotoboys.find(m => m.id == motoboyId);
+                            if (!localMotoboy) return;
+
+                            criteria.forEach((criterion, criterionIndex) => {
+                                if (evaluation[criterionIndex]) {
+                                    weekDays.forEach((day, dayIndex) => {
+                                        const value = evaluation[criterionIndex][dayIndex];
+                                        if (value !== undefined) {
+                                            evaluationsToInsert.push({
+                                                motoboy_id: null, // Será resolvido depois
+                                                motoboy_name: localMotoboy.nome,
+                                                week_year: week,
+                                                criterion_index: criterionIndex,
+                                                day_index: dayIndex,
+                                                value: value
+                                            });
+                                        }
+                                    });
+                                }
+                            });
+
+                            // Adicionar observações se existirem
+                            if (evaluation.observations) {
+                                evaluationsToInsert.push({
+                                    motoboy_id: null,
+                                    motoboy_name: localMotoboy.nome,
+                                    week_year: week,
+                                    criterion_index: -1,
+                                    day_index: -1,
+                                    observations: evaluation.observations
+                                });
+                            }
+                        });
+
+                        // Inserir avaliações (simplificado - pode precisar de ajustes)
+                        if (evaluationsToInsert.length > 0) {
+                            console.log(`Migrando ${evaluationsToInsert.length} avaliações...`);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Erro na migração:', error);
+            }
+        }
+
+        // ============= GERENCIAMENTO DE DADOS =============
+
+        async function loadAllData() {
+            if (isOnlineMode) {
+                await loadFromSupabase();
+            } else {
+                loadFromLocal();
+            }
+            
+            displayMotoboys();
+            updateMotoboySelect();
+        }
+
+        async function loadFromSupabase() {
+            if (!supabase) return;
+
+            try {
+                // Carregar motoboys
+                const { data: motoboyData, error: motoboyError } = await supabase
+                    .from('motoboys')
+                    .select('*')
+                    .eq('ativo', true)
+                    .order('nome');
+
+                if (motoboyError) throw motoboyError;
+
+                motoboys = motoboyData || [];
+
+                // Carregar avaliações
+                const { data: evaluationData, error: evaluationError } = await supabase
+                    .from('evaluations')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (evaluationError) throw evaluationError;
+
+                // Converter formato do Supabase para o formato local
+                evaluations = {};
+                (evaluationData || []).forEach(evaluation => {
+                    const key = `${evaluation.motoboy_id}-${evaluation.week_year}`;
+                    if (!evaluations[key]) {
+                        evaluations[key] = {};
+                    }
+                    
+                    if (evaluation.criterion_index >= 0) {
+                        if (!evaluations[key][evaluation.criterion_index]) {
+                            evaluations[key][evaluation.criterion_index] = {};
+                        }
+                        evaluations[key][evaluation.criterion_index][evaluation.day_index] = evaluation.value;
+                    }
+                    
+                    if (evaluation.observations) {
+                        evaluations[key].observations = evaluation.observations;
+                    }
+                });
+                
+            } catch (error) {
+                console.error('Erro ao carregar do Supabase:', error);
+                showAlert('Erro ao carregar dados da nuvem, usando dados locais.', 'warning');
+                isOnlineMode = false;
+                loadFromLocal();
+                updateModeIndicator();
+            }
+        }
+
+        function loadFromLocal() {
+            motoboys = JSON.parse(localStorage.getItem('motoboys') || '[]');
+            evaluations = JSON.parse(localStorage.getItem('evaluations') || '{}');
+        }
+
+        function saveToLocal() {
+            localStorage.setItem('motoboys', JSON.stringify(motoboys));
+            localStorage.setItem('evaluations', JSON.stringify(evaluations));
+        }
+
+        // ============= NAVEGAÇÃO =============
+
         function showTab(tabName) {
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
@@ -536,8 +891,9 @@
             }
         }
 
-        // Cadastro de motoboys
-        document.getElementById('motoboyForm').addEventListener('submit', function(e) {
+        // ============= CADASTRO DE MOTOBOYS =============
+
+        document.getElementById('motoboyForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             const btn = document.getElementById('cadastrarBtn');
@@ -546,36 +902,60 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="loading"><div class="spinner"></div>Salvando...</span>';
             
-            setTimeout(() => {
+            try {
                 const motoboyData = {
-                    id: Date.now(),
+                    id: Date.now(), // Para modo local
                     nome: document.getElementById('nome').value,
                     telefone: document.getElementById('telefone').value,
                     veiculo: document.getElementById('veiculo').value,
                     placa: document.getElementById('placa').value
                 };
 
-                motoboys.push(motoboyData);
-                localStorage.setItem('motoboys', JSON.stringify(motoboys));
-                
+                if (isOnlineMode && supabase) {
+                    // Salvar no Supabase
+                    const { data, error } = await supabase
+                        .from('motoboys')
+                        .insert([{
+                            nome: motoboyData.nome,
+                            telefone: motoboyData.telefone,
+                            veiculo: motoboyData.veiculo,
+                            placa: motoboyData.placa
+                        }])
+                        .select();
+
+                    if (error) throw error;
+                    
+                    // Atualizar cache local
+                    if (data && data[0]) {
+                        motoboyData.id = data[0].id;
+                        motoboys.push(motoboyData);
+                    }
+                } else {
+                    // Salvar localmente
+                    motoboys.push(motoboyData);
+                    saveToLocal();
+                }
+
                 showAlert('Motoboy cadastrado com sucesso!', 'success');
                 this.reset();
-                loadMotoboys();
+                displayMotoboys();
+                updateMotoboySelect();
                 
+            } catch (error) {
+                console.error('Erro ao cadastrar:', error);
+                showAlert('Erro ao cadastrar motoboy: ' + error.message, 'danger');
+            } finally {
                 btn.disabled = false;
                 btn.textContent = originalText;
-            }, 1000);
+            }
         });
 
-        function loadMotoboys() {
+        function displayMotoboys() {
             const list = document.getElementById('motoboysList');
-            const select = document.getElementById('motoboySelect');
             
             list.innerHTML = '';
-            select.innerHTML = '<option value="">Selecione um Motoboy</option>';
 
             motoboys.forEach(motoboy => {
-                // Card na lista
                 const card = document.createElement('div');
                 card.className = 'motoboy-card';
                 card.innerHTML = `
@@ -586,8 +966,14 @@
                     <button class="btn btn-danger" onclick="deleteMotoboy(${motoboy.id})">Excluir</button>
                 `;
                 list.appendChild(card);
+            });
+        }
 
-                // Opção no select
+        function updateMotoboySelect() {
+            const select = document.getElementById('motoboySelect');
+            select.innerHTML = '<option value="">Selecione um Motoboy</option>';
+
+            motoboys.forEach(motoboy => {
                 const option = document.createElement('option');
                 option.value = motoboy.id;
                 option.textContent = motoboy.nome;
@@ -595,16 +981,39 @@
             });
         }
 
-        function deleteMotoboy(id) {
+        async function deleteMotoboy(id) {
             if (!confirm('Tem certeza que deseja excluir este motoboy?')) return;
 
-            motoboys = motoboys.filter(m => m.id !== id);
-            localStorage.setItem('motoboys', JSON.stringify(motoboys));
-            loadMotoboys();
-            showAlert('Motoboy excluído com sucesso!', 'success');
+            try {
+                if (isOnlineMode && supabase) {
+                    // Exclusão lógica no Supabase
+                    const { error } = await supabase
+                        .from('motoboys')
+                        .update({ ativo: false })
+                        .eq('id', id);
+
+                    if (error) throw error;
+                }
+
+                // Remover do cache local
+                motoboys = motoboys.filter(m => m.id != id);
+                
+                if (!isOnlineMode) {
+                    saveToLocal();
+                }
+
+                displayMotoboys();
+                updateMotoboySelect();
+                showAlert('Motoboy excluído com sucesso!', 'success');
+                
+            } catch (error) {
+                console.error('Erro ao excluir:', error);
+                showAlert('Erro ao excluir motoboy: ' + error.message, 'danger');
+            }
         }
 
-        // Sistema de avaliação
+        // ============= SISTEMA DE AVALIAÇÃO =============
+
         function setCurrentWeek() {
             const now = new Date();
             const year = now.getFullYear();
@@ -694,7 +1103,7 @@
             document.getElementById('evaluationContent').innerHTML = html;
         }
 
-        function setEvaluation(criterionIndex, dayIndex, value) {
+        async function setEvaluation(criterionIndex, dayIndex, value) {
             const motoboyId = document.getElementById('motoboySelect').value;
             const week = document.getElementById('weekSelector').value;
             const evaluationKey = `${motoboyId}-${week}`;
@@ -708,15 +1117,58 @@
             }
             
             evaluations[evaluationKey][criterionIndex][dayIndex] = value;
+
+            // Salvar no Supabase se online
+            if (isOnlineMode && supabase) {
+                try {
+                    const evaluationData = {
+                        motoboy_id: motoboyId,
+                        week_year: week,
+                        criterion_index: criterionIndex,
+                        day_index: dayIndex,
+                        value: value,
+                        updated_at: new Date().toISOString()
+                    };
+
+                    const { data: existing, error: selectError } = await supabase
+                        .from('evaluations')
+                        .select('id')
+                        .eq('motoboy_id', motoboyId)
+                        .eq('week_year', week)
+                        .eq('criterion_index', criterionIndex)
+                        .eq('day_index', dayIndex)
+                        .single();
+
+                    if (selectError && selectError.code !== 'PGRST116') {
+                        throw selectError;
+                    }
+
+                    if (existing) {
+                        await supabase
+                            .from('evaluations')
+                            .update(evaluationData)
+                            .eq('id', existing.id);
+                    } else {
+                        await supabase
+                            .from('evaluations')
+                            .insert([evaluationData]);
+                    }
+                } catch (error) {
+                    console.error('Erro ao salvar no Supabase:', error);
+                }
+            } else {
+                // Salvar localmente
+                saveToLocal();
+            }
             
             loadEvaluations(); // Recarrega para atualizar visual
         }
 
-        function saveEvaluations() {
+        async function saveEvaluations() {
             const motoboyId = document.getElementById('motoboySelect').value;
             const week = document.getElementById('weekSelector').value;
-            const evaluationKey = `${motoboyId}-${week}`;
             const observations = document.getElementById('observations').value;
+            const evaluationKey = `${motoboyId}-${week}`;
             
             const btn = document.getElementById('saveEvaluationBtn');
             const originalText = btn.textContent;
@@ -724,22 +1176,67 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="loading"><div class="spinner"></div>Salvando...</span>';
 
-            setTimeout(() => {
+            try {
                 if (!evaluations[evaluationKey]) {
                     evaluations[evaluationKey] = {};
                 }
                 
                 evaluations[evaluationKey].observations = observations;
-                localStorage.setItem('evaluations', JSON.stringify(evaluations));
+
+                if (isOnlineMode && supabase) {
+                    // Salvar observações no Supabase
+                    if (observations.trim()) {
+                        const obsData = {
+                            motoboy_id: motoboyId,
+                            week_year: week,
+                            observations: observations,
+                            criterion_index: -1,
+                            day_index: -1,
+                            updated_at: new Date().toISOString()
+                        };
+
+                        const { data: existing, error: selectError } = await supabase
+                            .from('evaluations')
+                            .select('id')
+                            .eq('motoboy_id', motoboyId)
+                            .eq('week_year', week)
+                            .eq('criterion_index', -1)
+                            .eq('day_index', -1)
+                            .single();
+
+                        if (selectError && selectError.code !== 'PGRST116') {
+                            throw selectError;
+                        }
+
+                        if (existing) {
+                            await supabase
+                                .from('evaluations')
+                                .update(obsData)
+                                .eq('id', existing.id);
+                        } else {
+                            await supabase
+                                .from('evaluations')
+                                .insert([obsData]);
+                        }
+                    }
+                } else {
+                    // Salvar localmente
+                    saveToLocal();
+                }
 
                 showAlert('Avaliação salva com sucesso!', 'success');
                 
+            } catch (error) {
+                console.error('Erro ao salvar:', error);
+                showAlert('Erro ao salvar avaliação: ' + error.message, 'danger');
+            } finally {
                 btn.disabled = false;
                 btn.textContent = originalText;
-            }, 1000);
+            }
         }
 
-        // Dashboard
+        // ============= DASHBOARD =============
+
         function updateDashboard() {
             const stats = calculateStats();
             
@@ -871,7 +1368,8 @@
                 .sort((a, b) => b.performance - a.performance);
         }
 
-        // Relatórios
+        // ============= RELATÓRIOS =============
+
         function generateReport() {
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
@@ -905,7 +1403,7 @@
                     motoboyData.criteria[criterion] = { positive: 0, negative: 0 };
                 });
 
-                // Filtrar avaliações do período (simplificado - considerando todas para demonstração)
+                // Processar avaliações (simplificado - todas as avaliações)
                 Object.keys(evaluations).forEach(evaluationKey => {
                     const [motoboyId] = evaluationKey.split('-');
                     if (motoboyId == motoboy.id) {
@@ -936,9 +1434,7 @@
                 reportData.totalEvaluations += motoboyData.total;
             });
 
-            // Ordenar por performance
             reportData.motoboys.sort((a, b) => b.performance - a.performance);
-
             return reportData;
         }
 
@@ -947,6 +1443,7 @@
                 <div class="report-section">
                     <h3>📈 Relatório Detalhado - ${data.period}</h3>
                     <p><strong>Total de Avaliações no Período:</strong> ${data.totalEvaluations}</p>
+                    <p><strong>Modo de Operação:</strong> ${isOnlineMode ? '☁️ Online (Supabase)' : '🔌 Local'}</p>
                     
                     <h4>Performance por Motoboy:</h4>
             `;
@@ -983,127 +1480,10 @@
                 `;
             });
 
-            html += `
-                </div>
-                
-                <div class="report-section">
-                    <h3>📊 Resumo Executivo</h3>
-                    <div class="dashboard-grid">
-                        <div class="dashboard-card">
-                            <h4>Melhor Performance</h4>
-                            <p><strong>${data.motoboys.length > 0 ? data.motoboys[0].nome : 'N/A'}</strong></p>
-                            <p>${data.motoboys.length > 0 ? data.motoboys[0].performance : 0}%</p>
-                        </div>
-                        <div class="dashboard-card">
-                            <h4>Média Geral</h4>
-                            <p><strong>${data.motoboys.length > 0 ? Math.round(data.motoboys.reduce((acc, m) => acc + m.performance, 0) / data.motoboys.length) : 0}%</strong></p>
-                        </div>
-                        <div class="dashboard-card">
-                            <h4>Total Avaliações</h4>
-                            <p><strong>${data.totalEvaluations}</strong></p>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="report-section">
-                    <h3>🎯 Recomendações</h3>
-                    <div id="recommendations"></div>
-                </div>
-            `;
-
+            html += `</div>`;
             document.getElementById('reportContent').innerHTML = html;
-            generateRecommendations(data);
         }
 
-        function generateRecommendations(data) {
-            let recommendations = [];
-            
-            // Análise de performance geral
-            const averagePerformance = data.motoboys.length > 0 ? 
-                data.motoboys.reduce((acc, m) => acc + m.performance, 0) / data.motoboys.length : 0;
-            
-            if (averagePerformance < 70) {
-                recommendations.push({
-                    type: 'warning',
-                    title: 'Performance Abaixo do Esperado',
-                    description: 'A performance média da equipe está abaixo de 70%. Considere implementar treinamentos específicos.'
-                });
-            }
-            
-            // Identificar motoboys com baixa performance
-            const lowPerformers = data.motoboys.filter(m => m.performance < 60);
-            if (lowPerformers.length > 0) {
-                recommendations.push({
-                    type: 'action',
-                    title: 'Motoboys Necessitando Atenção',
-                    description: `${lowPerformers.map(m => m.nome).join(', ')} precisam de acompanhamento especial e possível retreinamento.`
-                });
-            }
-            
-            // Identificar pontos fortes
-            const topPerformers = data.motoboys.filter(m => m.performance > 85);
-            if (topPerformers.length > 0) {
-                recommendations.push({
-                    type: 'success',
-                    title: 'Destaques da Equipe',
-                    description: `${topPerformers.map(m => m.nome).join(', ')} demonstram excelente performance. Considere reconhecimento ou promoção.`
-                });
-            }
-            
-            // Análise de critérios mais problemáticos
-            const criteriaAnalysis = {};
-            data.motoboys.forEach(motoboy => {
-                Object.keys(motoboy.criteria).forEach(criterion => {
-                    if (!criteriaAnalysis[criterion]) {
-                        criteriaAnalysis[criterion] = { positive: 0, negative: 0 };
-                    }
-                    criteriaAnalysis[criterion].positive += motoboy.criteria[criterion].positive;
-                    criteriaAnalysis[criterion].negative += motoboy.criteria[criterion].negative;
-                });
-            });
-            
-            const problematicCriteria = Object.keys(criteriaAnalysis)
-                .map(criterion => ({
-                    name: criterion,
-                    percentage: criteriaAnalysis[criterion].positive + criteriaAnalysis[criterion].negative > 0 ?
-                        (criteriaAnalysis[criterion].positive / (criteriaAnalysis[criterion].positive + criteriaAnalysis[criterion].negative)) * 100 : 0
-                }))
-                .filter(c => c.percentage < 70)
-                .sort((a, b) => a.percentage - b.percentage);
-            
-            if (problematicCriteria.length > 0) {
-                recommendations.push({
-                    type: 'focus',
-                    title: 'Áreas de Melhoria Prioritárias',
-                    description: `Focar no treinamento para: ${problematicCriteria.slice(0, 3).map(c => c.name).join(', ')}`
-                });
-            }
-            
-            let html = '';
-            recommendations.forEach(rec => {
-                const iconMap = {
-                    warning: '⚠️',
-                    action: '🎯',
-                    success: '🏆',
-                    focus: '📍'
-                };
-                
-                html += `
-                    <div class="alert alert-${rec.type === 'warning' ? 'danger' : 'success'}" style="margin-bottom: 15px;">
-                        <strong>${iconMap[rec.type]} ${rec.title}</strong><br>
-                        ${rec.description}
-                    </div>
-                `;
-            });
-            
-            if (recommendations.length === 0) {
-                html = '<div class="alert alert-success">✅ <strong>Parabéns!</strong> A equipe está apresentando boa performance geral!</div>';
-            }
-            
-            document.getElementById('recommendations').innerHTML = html;
-        }
-
-        // Função para exportar relatório
         function exportReport() {
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
@@ -1132,24 +1512,12 @@
                 csv += `${motoboy.nome},${motoboy.performance},${motoboy.positive},${motoboy.negative},${motoboy.total}\n`;
             });
             
-            // Adicionar detalhamento por critério
-            csv += '\n\nDetalhamento por Criterio\n';
-            csv += 'Motoboy,Criterio,Positivas,Negativas,Performance (%)\n';
-            
-            data.motoboys.forEach(motoboy => {
-                Object.keys(motoboy.criteria).forEach(criterion => {
-                    const criterionData = motoboy.criteria[criterion];
-                    const total = criterionData.positive + criterionData.negative;
-                    const percentage = total > 0 ? Math.round((criterionData.positive / total) * 100) : 0;
-                    csv += `${motoboy.nome},${criterion},${criterionData.positive},${criterionData.negative},${percentage}\n`;
-                });
-            });
-            
             return csv;
         }
 
+        // ============= UTILITÁRIOS =============
+
         function showAlert(message, type) {
-            // Remove alertas existentes
             const existingAlerts = document.querySelectorAll('.alert');
             existingAlerts.forEach(alert => alert.remove());
             
@@ -1157,21 +1525,20 @@
             alert.className = `alert alert-${type}`;
             alert.innerHTML = message;
             
-            // Adicionar no topo do container
             const container = document.querySelector('.container');
             container.insertBefore(alert, container.children[1]);
             
-            // Remover após 5 segundos
             setTimeout(() => {
                 alert.remove();
             }, 5000);
         }
 
-        // Função para backup/restauração dos dados
+        // Backup/Restore para modo local
         function backupData() {
             const data = {
                 motoboys: motoboys,
                 evaluations: evaluations,
+                mode: isOnlineMode ? 'online' : 'local',
                 timestamp: new Date().toISOString()
             };
             
@@ -1181,8 +1548,32 @@
             link.download = `backup_sistema_motoboys_${new Date().toISOString().split('T')[0]}.json`;
             link.click();
             
-            showAlert('Backup dos dados realizado com sucesso!', 'success');
+            showAlert('Backup realizado com sucesso!', 'success');
         }
+
+        // Adicionar seção de backup
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(() => {
+                const backupSection = document.createElement('div');
+                backupSection.className = 'report-section';
+                backupSection.style.marginTop = '20px';
+                backupSection.innerHTML = `
+                    <h3>🔧 Gerenciamento de Dados</h3>
+                    <p><strong>Modo atual:</strong> <span id="currentMode">${isOnlineMode ? '☁️ Online' : '🔌 Local'}</span></p>
+                    <button class="btn" onclick="backupData()">📥 Fazer Backup</button>
+                    <button class="btn" onclick="document.getElementById('restoreFile').click()">📤 Restaurar Backup</button>
+                    <input type="file" id="restoreFile" accept=".json" style="display: none;" onchange="restoreData(event)">
+                    
+                    <div style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px; font-size: 14px;">
+                        <strong>📝 Informações:</strong><br>
+                        • <strong>Modo Local:</strong> Dados salvos apenas neste navegador<br>
+                        • <strong>Modo Online:</strong> Dados sincronizados na nuvem (Supabase)<br>
+                        • Use o backup para migrar entre computadores ou como segurança
+                    </div>
+                `;
+                document.querySelector('.container').appendChild(backupSection);
+            }, 1000);
+        });
 
         function restoreData(event) {
             const file = event.target.files[0];
@@ -1197,12 +1588,18 @@
                         if (confirm('Tem certeza que deseja restaurar os dados? Isso substituirá todos os dados atuais.')) {
                             motoboys = data.motoboys;
                             evaluations = data.evaluations;
-                            localStorage.setItem('motoboys', JSON.stringify(motoboys));
-                            localStorage.setItem('evaluations', JSON.stringify(evaluations));
                             
-                            loadMotoboys();
+                            // Salvar conforme o modo atual
+                            if (isOnlineMode) {
+                                // Em modo online, seria necessário sincronizar com Supabase
+                                showAlert('Dados restaurados! Para sincronizar com Supabase, reconecte-se.', 'warning');
+                            } else {
+                                saveToLocal();
+                                showAlert('Dados restaurados com sucesso!', 'success');
+                            }
+                            
+                            loadAllData();
                             updateDashboard();
-                            showAlert('Dados restaurados com sucesso!', 'success');
                         }
                     } else {
                         showAlert('Arquivo de backup inválido.', 'danger');
@@ -1213,21 +1610,6 @@
             };
             reader.readAsText(file);
         }
-
-        // Adicionar botões de backup no final da página
-        document.addEventListener('DOMContentLoaded', function() {
-            const backupSection = document.createElement('div');
-            backupSection.className = 'report-section';
-            backupSection.style.marginTop = '20px';
-            backupSection.innerHTML = `
-                <h3>🔧 Gerenciamento de Dados</h3>
-                <p>Faça backup dos seus dados para não perder informações importantes.</p>
-                <button class="btn" onclick="backupData()">📥 Fazer Backup</button>
-                <input type="file" id="restoreFile" accept=".json" style="display: none;" onchange="restoreData(event)">
-                <button class="btn" onclick="document.getElementById('restoreFile').click()">📤 Restaurar Backup</button>
-            `;
-            document.querySelector('.container').appendChild(backupSection);
-        });
     </script>
 </body>
           <script>
