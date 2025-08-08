@@ -149,6 +149,13 @@
             box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
         }
 
+        .btn:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
         .btn-danger {
             background: #ef4444;
         }
@@ -337,6 +344,26 @@
             border: 1px solid #f5c6cb;
         }
 
+        .loading {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 10px;
@@ -409,7 +436,7 @@
                     <label for="placa">Placa:</label>
                     <input type="text" id="placa" required>
                 </div>
-                <button type="submit" class="btn">Cadastrar Motoboy</button>
+                <button type="submit" class="btn" id="cadastrarBtn">Cadastrar Motoboy</button>
             </form>
 
             <h3 style="margin-top: 30px;">Motoboys Cadastrados</h3>
@@ -464,15 +491,15 @@
     </div>
 
     <script>
-        // Armazenamento usando variáveis em memória (não localStorage)
-        let motoboys = [];
-        let evaluations = {};
+        // Sistema simplificado usando Local Storage para demonstração
+        let motoboys = JSON.parse(localStorage.getItem('motoboys')) || [];
+        let evaluations = JSON.parse(localStorage.getItem('evaluations')) || {};
 
         const criteria = [
             'Pontualidade',
             'Boa apresentação da imagem',
             'Postura adequada na frente de loja',
-            'Boa comunicação com os clientes e funcionários da loja (administração, supervisão e equipe de vendas)',
+            'Boa comunicação com os clientes e funcionários da loja',
             'Sem reclamações',
             'Elaboração das rotas a cada corrida, diariamente',
             'Agilidade na entregas',
@@ -513,20 +540,31 @@
         document.getElementById('motoboyForm').addEventListener('submit', function(e) {
             e.preventDefault();
             
-            const motoboy = {
-                id: Date.now(),
-                nome: document.getElementById('nome').value,
-                telefone: document.getElementById('telefone').value,
-                veiculo: document.getElementById('veiculo').value,
-                placa: document.getElementById('placa').value,
-                cadastrado: new Date().toISOString()
-            };
-
-            motoboys.push(motoboy);
+            const btn = document.getElementById('cadastrarBtn');
+            const originalText = btn.textContent;
             
-            showAlert('Motoboy cadastrado com sucesso!', 'success');
-            this.reset();
-            loadMotoboys();
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"><div class="spinner"></div>Salvando...</span>';
+            
+            setTimeout(() => {
+                const motoboyData = {
+                    id: Date.now(),
+                    nome: document.getElementById('nome').value,
+                    telefone: document.getElementById('telefone').value,
+                    veiculo: document.getElementById('veiculo').value,
+                    placa: document.getElementById('placa').value
+                };
+
+                motoboys.push(motoboyData);
+                localStorage.setItem('motoboys', JSON.stringify(motoboys));
+                
+                showAlert('Motoboy cadastrado com sucesso!', 'success');
+                this.reset();
+                loadMotoboys();
+                
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }, 1000);
         });
 
         function loadMotoboys() {
@@ -558,11 +596,12 @@
         }
 
         function deleteMotoboy(id) {
-            if (confirm('Tem certeza que deseja excluir este motoboy?')) {
-                motoboys = motoboys.filter(m => m.id !== id);
-                loadMotoboys();
-                showAlert('Motoboy excluído com sucesso!', 'success');
-            }
+            if (!confirm('Tem certeza que deseja excluir este motoboy?')) return;
+
+            motoboys = motoboys.filter(m => m.id !== id);
+            localStorage.setItem('motoboys', JSON.stringify(motoboys));
+            loadMotoboys();
+            showAlert('Motoboy excluído com sucesso!', 'success');
         }
 
         // Sistema de avaliação
@@ -639,15 +678,17 @@
                 html += '</tr>';
             });
 
+            const observations = currentEvaluation.observations || '';
+
             html += `
                     </tbody>
                 </table>
                 <div class="form-group" style="margin-top: 20px;">
                     <label>Observações:</label>
                     <textarea class="observations-textarea" id="observations" 
-                              placeholder="Observações sobre a semana...">${currentEvaluation.observations || ''}</textarea>
+                              placeholder="Observações sobre a semana...">${observations}</textarea>
                 </div>
-                <button class="btn btn-success" onclick="saveEvaluations()">Salvar Avaliação</button>
+                <button class="btn btn-success" onclick="saveEvaluations()" id="saveEvaluationBtn">Salvar Avaliação</button>
             `;
 
             document.getElementById('evaluationContent').innerHTML = html;
@@ -677,23 +718,33 @@
             const evaluationKey = `${motoboyId}-${week}`;
             const observations = document.getElementById('observations').value;
             
-            if (!evaluations[evaluationKey]) {
-                evaluations[evaluationKey] = {};
-            }
-            
-            evaluations[evaluationKey].observations = observations;
-            evaluations[evaluationKey].lastUpdated = new Date().toISOString();
-            
-            showAlert('Avaliação salva com sucesso!', 'success');
+            const btn = document.getElementById('saveEvaluationBtn');
+            const originalText = btn.textContent;
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"><div class="spinner"></div>Salvando...</span>';
+
+            setTimeout(() => {
+                if (!evaluations[evaluationKey]) {
+                    evaluations[evaluationKey] = {};
+                }
+                
+                evaluations[evaluationKey].observations = observations;
+                localStorage.setItem('evaluations', JSON.stringify(evaluations));
+
+                showAlert('Avaliação salva com sucesso!', 'success');
+                
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }, 1000);
         }
 
         // Dashboard
         function updateDashboard() {
+            const stats = calculateStats();
+            
             const cards = document.getElementById('dashboardCards');
             const ranking = document.getElementById('rankingList');
-            
-            // Calcular estatísticas
-            const stats = calculateStats();
             
             cards.innerHTML = `
                 <div class="dashboard-card">
@@ -740,7 +791,8 @@
             let totalNegative = 0;
             let totalEvaluations = 0;
 
-            Object.values(evaluations).forEach(evaluation => {
+            Object.keys(evaluations).forEach(evaluationKey => {
+                const evaluation = evaluations[evaluationKey];
                 criteria.forEach((_, criterionIndex) => {
                     if (evaluation[criterionIndex]) {
                         weekDays.forEach((_, dayIndex) => {
@@ -787,10 +839,10 @@
                 };
             });
 
-            // Calcular stats baseado nas avaliações
-            Object.keys(evaluations).forEach(key => {
-                const motoboyId = key.split('-')[0];
-                const evaluation = evaluations[key];
+            // Calcular stats
+            Object.keys(evaluations).forEach(evaluationKey => {
+                const [motoboyId] = evaluationKey.split('-');
+                const evaluation = evaluations[evaluationKey];
 
                 if (motoboyStats[motoboyId]) {
                     criteria.forEach((_, criterionIndex) => {
@@ -853,10 +905,11 @@
                     motoboyData.criteria[criterion] = { positive: 0, negative: 0 };
                 });
 
-                // Calcular dados baseados nas avaliações existentes
-                Object.keys(evaluations).forEach(key => {
-                    if (key.startsWith(motoboy.id + '-')) {
-                        const evaluation = evaluations[key];
+                // Filtrar avaliações do período (simplificado - considerando todas para demonstração)
+                Object.keys(evaluations).forEach(evaluationKey => {
+                    const [motoboyId] = evaluationKey.split('-');
+                    if (motoboyId == motoboy.id) {
+                        const evaluation = evaluations[evaluationKey];
                         criteria.forEach((criterion, criterionIndex) => {
                             if (evaluation[criterionIndex]) {
                                 weekDays.forEach((_, dayIndex) => {
@@ -882,6 +935,9 @@
                 reportData.motoboys.push(motoboyData);
                 reportData.totalEvaluations += motoboyData.total;
             });
+
+            // Ordenar por performance
+            reportData.motoboys.sort((a, b) => b.performance - a.performance);
 
             return reportData;
         }
@@ -1076,6 +1132,19 @@
                 csv += `${motoboy.nome},${motoboy.performance},${motoboy.positive},${motoboy.negative},${motoboy.total}\n`;
             });
             
+            // Adicionar detalhamento por critério
+            csv += '\n\nDetalhamento por Criterio\n';
+            csv += 'Motoboy,Criterio,Positivas,Negativas,Performance (%)\n';
+            
+            data.motoboys.forEach(motoboy => {
+                Object.keys(motoboy.criteria).forEach(criterion => {
+                    const criterionData = motoboy.criteria[criterion];
+                    const total = criterionData.positive + criterionData.negative;
+                    const percentage = total > 0 ? Math.round((criterionData.positive / total) * 100) : 0;
+                    csv += `${motoboy.nome},${criterion},${criterionData.positive},${criterionData.negative},${percentage}\n`;
+                });
+            });
+            
             return csv;
         }
 
@@ -1097,6 +1166,68 @@
                 alert.remove();
             }, 5000);
         }
+
+        // Função para backup/restauração dos dados
+        function backupData() {
+            const data = {
+                motoboys: motoboys,
+                evaluations: evaluations,
+                timestamp: new Date().toISOString()
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `backup_sistema_motoboys_${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            
+            showAlert('Backup dos dados realizado com sucesso!', 'success');
+        }
+
+        function restoreData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    if (data.motoboys && data.evaluations) {
+                        if (confirm('Tem certeza que deseja restaurar os dados? Isso substituirá todos os dados atuais.')) {
+                            motoboys = data.motoboys;
+                            evaluations = data.evaluations;
+                            localStorage.setItem('motoboys', JSON.stringify(motoboys));
+                            localStorage.setItem('evaluations', JSON.stringify(evaluations));
+                            
+                            loadMotoboys();
+                            updateDashboard();
+                            showAlert('Dados restaurados com sucesso!', 'success');
+                        }
+                    } else {
+                        showAlert('Arquivo de backup inválido.', 'danger');
+                    }
+                } catch (error) {
+                    showAlert('Erro ao ler o arquivo de backup.', 'danger');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // Adicionar botões de backup no final da página
+        document.addEventListener('DOMContentLoaded', function() {
+            const backupSection = document.createElement('div');
+            backupSection.className = 'report-section';
+            backupSection.style.marginTop = '20px';
+            backupSection.innerHTML = `
+                <h3>🔧 Gerenciamento de Dados</h3>
+                <p>Faça backup dos seus dados para não perder informações importantes.</p>
+                <button class="btn" onclick="backupData()">📥 Fazer Backup</button>
+                <input type="file" id="restoreFile" accept=".json" style="display: none;" onchange="restoreData(event)">
+                <button class="btn" onclick="document.getElementById('restoreFile').click()">📤 Restaurar Backup</button>
+            `;
+            document.querySelector('.container').appendChild(backupSection);
+        });
     </script>
 </body>
           <script>
