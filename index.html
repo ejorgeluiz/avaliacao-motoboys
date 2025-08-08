@@ -181,13 +181,14 @@
             padding: 16px;
             text-align: center;
             font-weight: 600;
-            font-size: 14px;
+            font-size: 13px;
         }
 
         .evaluation-table td {
-            padding: 12px;
+            padding: 10px 8px;
             text-align: center;
             border-bottom: 1px solid #f1f2f6;
+            font-size: 12px;
         }
 
         .evaluation-table tr:hover {
@@ -197,16 +198,20 @@
         .criteria-cell {
             text-align: left !important;
             font-weight: 500;
+            padding-left: 15px !important;
+            max-width: 200px;
+            word-wrap: break-word;
+            font-size: 12px !important;
         }
 
         .evaluation-btn {
             background: none;
             border: 2px solid #ddd;
-            padding: 8px 12px;
-            margin: 2px;
+            padding: 6px 10px;
+            margin: 1px;
             border-radius: 8px;
             cursor: pointer;
-            font-size: 18px;
+            font-size: 16px;
             transition: all 0.3s ease;
         }
 
@@ -346,12 +351,26 @@
             }
             
             .evaluation-table {
-                font-size: 14px;
+                font-size: 12px;
+                display: block;
+                overflow-x: auto;
+                white-space: nowrap;
             }
             
             .evaluation-table th,
             .evaluation-table td {
-                padding: 8px 4px;
+                padding: 6px 4px;
+                min-width: 80px;
+            }
+            
+            .criteria-cell {
+                min-width: 180px !important;
+                max-width: 180px !important;
+            }
+            
+            .evaluation-btn {
+                padding: 4px 8px;
+                font-size: 14px;
             }
         }
     </style>
@@ -451,13 +470,17 @@
 
         const criteria = [
             'Pontualidade',
-            'Agilidade (c/ segurança)',
-            'Boa apresentação',
-            'Cordialidade com clientes',
-            'Cumprimento das rotas',
+            'Boa apresentação da imagem',
+            'Postura adequada na frente de loja',
+            'Boa comunicação com os clientes e funcionários da loja (administração, supervisão e equipe de vendas)',
             'Sem reclamações',
-            'Cuidado com produtos',
-            'Comunicação clara'
+            'Elaboração das rotas a cada corrida, diariamente',
+            'Agilidade na entregas',
+            'Cordialidade com os clientes',
+            'Feedback dos clientes',
+            'Confirmação das entregas ou bairros com o número do pedido',
+            'Organização',
+            'Prestação de contas em dia'
         ];
 
         const weekDays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -1075,5 +1098,33 @@
             }, 5000);
         }
     </script>
+</body>
+          <script>
+    const acesso = localStorage.getItem("autenticado");
+    if (acesso !== "sim") {
+      const senha = prompt("Digite a senha para acessar:");
+      if (senha === "Admin.0258") {
+        localStorage.setItem("autenticado", "sim");
+      } else {
+        alert("Senha incorreta. Redirecionando...");
+        window.location.href = "about:blank";
+      }
+    }
+  </script>
+
+  <h1>Bem-vindo!</h1>
+  <p>Esse conteúdo só aparece após digitar a senha.</p>
+
+  <button onclick="logout()">Sair</button>
+  <script>
+    function logout() {
+      localStorage.removeItem("autenticado");
+      location.reload();
+    }
+
+    function formatarData(data) {
+      return new Date(data + 'T00:00:00').toLocaleDateString('pt-BR');
+    }
+  </script>
 </body>
 </html>
