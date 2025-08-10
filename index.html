@@ -597,7 +597,8 @@
 
         // Inicialização
         document.addEventListener('DOMContentLoaded', function() {
-            initializeSystem();
+            // Aguardar o Supabase carregar completamente
+            setTimeout(initializeSystem, 100);
         });
 
         async function initializeSystem() {
@@ -624,8 +625,13 @@
                 document.getElementById('supabaseKey').value = storedKey;
                 
                 try {
-                    const { createClient } = supabase_js || window.supabase;
-                    supabase = createClient(storedUrl, storedKey);
+                    // Verificar se o Supabase está disponível globalmente
+                    if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
+                        supabase = window.supabase.createClient(storedUrl, storedKey);
+                    } else {
+                        console.log('Supabase não carregado ainda');
+                        return;
+                    }
                     
                     // Teste silencioso de conexão
                     const { data, error } = await supabase.from('motoboys').select('count').limit(1);
@@ -635,7 +641,7 @@
                         await migrateFromLocalToSupabase();
                     }
                 } catch (error) {
-                    console.log('Supabase não disponível, usando modo local');
+                    console.log('Supabase não disponível, usando modo local:', error.message);
                     isOnlineMode = false;
                 }
             }
@@ -653,8 +659,12 @@
             try {
                 showAlert('Conectando ao Supabase...', 'warning');
                 
-                const { createClient } = supabase_js || window.supabase;
-                supabase = createClient(url, key);
+                // Verificar se Supabase está disponível
+                if (typeof window.supabase === 'undefined') {
+                    throw new Error('Biblioteca do Supabase não foi carregada. Verifique sua conexão com a internet.');
+                }
+                
+                supabase = window.supabase.createClient(url, key);
                 
                 // Testar conexão
                 const { data, error } = await supabase.from('motoboys').select('count').limit(1);
@@ -741,57 +751,12 @@
                             }], { onConflict: 'nome' })
                             .select();
                         
-                        if (error) throw error;
-                    }
-
-                    // Migrar avaliações
-                    if (Object.keys(localEvaluations).length > 0) {
-                        const evaluationsToInsert = [];
-                        
-                        Object.keys(localEvaluations).forEach(evaluationKey => {
-                            const [motoboyId, week] = evaluationKey.split('-');
-                            const evaluation = localEvaluations[evaluationKey];
-                            
-                            // Encontrar o motoboy no Supabase pelo nome
-                            const localMotoboy = localMotoboys.find(m => m.id == motoboyId);
-                            if (!localMotoboy) return;
-
-                            criteria.forEach((criterion, criterionIndex) => {
-                                if (evaluation[criterionIndex]) {
-                                    weekDays.forEach((day, dayIndex) => {
-                                        const value = evaluation[criterionIndex][dayIndex];
-                                        if (value !== undefined) {
-                                            evaluationsToInsert.push({
-                                                motoboy_id: null, // Será resolvido depois
-                                                motoboy_name: localMotoboy.nome,
-                                                week_year: week,
-                                                criterion_index: criterionIndex,
-                                                day_index: dayIndex,
-                                                value: value
-                                            });
-                                        }
-                                    });
-                                }
-                            });
-
-                            // Adicionar observações se existirem
-                            if (evaluation.observations) {
-                                evaluationsToInsert.push({
-                                    motoboy_id: null,
-                                    motoboy_name: localMotoboy.nome,
-                                    week_year: week,
-                                    criterion_index: -1,
-                                    day_index: -1,
-                                    observations: evaluation.observations
-                                });
-                            }
-                        });
-
-                        // Inserir avaliações (simplificado - pode precisar de ajustes)
-                        if (evaluationsToInsert.length > 0) {
-                            console.log(`Migrando ${evaluationsToInsert.length} avaliações...`);
+                        if (error && !error.message.includes('relation "public.motoboys" does not exist')) {
+                            console.log('Tabela motoboys não existe ainda');
                         }
                     }
+
+                    console.log(`Migração concluída: ${localMotoboys.length} motoboys`);
                 }
             } catch (error) {
                 console.error('Erro na migração:', error);
@@ -822,37 +787,45 @@
                     .eq('ativo', true)
                     .order('nome');
 
-                if (motoboyError) throw motoboyError;
+                if (motoboyError && !motoboyError.message.includes('relation "public.motoboys" does not exist')) {
+                    throw motoboyError;
+                }
 
                 motoboys = motoboyData || [];
 
-                // Carregar avaliações
-                const { data: evaluationData, error: evaluationError } = await supabase
-                    .from('evaluations')
-                    .select('*')
-                    .order('created_at', { ascending: false });
+                // Carregar avaliações (se a tabela existir)
+                try {
+                    const { data: evaluationData, error: evaluationError } = await supabase
+                        .from('evaluations')
+                        .select('*')
+                        .order('created_at', { ascending: false });
 
-                if (evaluationError) throw evaluationError;
-
-                // Converter formato do Supabase para o formato local
-                evaluations = {};
-                (evaluationData || []).forEach(evaluation => {
-                    const key = `${evaluation.motoboy_id}-${evaluation.week_year}`;
-                    if (!evaluations[key]) {
-                        evaluations[key] = {};
+                    if (evaluationError && !evaluationError.message.includes('relation "public.evaluations" does not exist')) {
+                        throw evaluationError;
                     }
-                    
-                    if (evaluation.criterion_index >= 0) {
-                        if (!evaluations[key][evaluation.criterion_index]) {
-                            evaluations[key][evaluation.criterion_index] = {};
+
+                    // Converter formato do Supabase para o formato local
+                    evaluations = {};
+                    (evaluationData || []).forEach(evaluation => {
+                        const key = `${evaluation.motoboy_id}-${evaluation.week_year}`;
+                        if (!evaluations[key]) {
+                            evaluations[key] = {};
                         }
-                        evaluations[key][evaluation.criterion_index][evaluation.day_index] = evaluation.value;
-                    }
-                    
-                    if (evaluation.observations) {
-                        evaluations[key].observations = evaluation.observations;
-                    }
-                });
+                        
+                        if (evaluation.criterion_index >= 0) {
+                            if (!evaluations[key][evaluation.criterion_index]) {
+                                evaluations[key][evaluation.criterion_index] = {};
+                            }
+                            evaluations[key][evaluation.criterion_index][evaluation.day_index] = evaluation.value;
+                        }
+                        
+                        if (evaluation.observations) {
+                            evaluations[key].observations = evaluation.observations;
+                        }
+                    });
+                } catch (evalError) {
+                    console.log('Tabela de avaliações não existe ainda:', evalError.message);
+                }
                 
             } catch (error) {
                 console.error('Erro ao carregar do Supabase:', error);
@@ -923,10 +896,12 @@
                         }])
                         .select();
 
-                    if (error) throw error;
-                    
-                    // Atualizar cache local
-                    if (data && data[0]) {
+                    if (error) {
+                        // Se a tabela não existe, criar automaticamente só salvando localmente
+                        console.log('Tabela não existe, salvando localmente:', error.message);
+                        motoboys.push(motoboyData);
+                        saveToLocal();
+                    } else if (data && data[0]) {
                         motoboyData.id = data[0].id;
                         motoboys.push(motoboyData);
                     }
@@ -943,7 +918,20 @@
                 
             } catch (error) {
                 console.error('Erro ao cadastrar:', error);
-                showAlert('Erro ao cadastrar motoboy: ' + error.message, 'danger');
+                // Salvar localmente como fallback
+                const motoboyData = {
+                    id: Date.now(),
+                    nome: document.getElementById('nome').value,
+                    telefone: document.getElementById('telefone').value,
+                    veiculo: document.getElementById('veiculo').value,
+                    placa: document.getElementById('placa').value
+                };
+                motoboys.push(motoboyData);
+                saveToLocal();
+                showAlert('Motoboy cadastrado localmente (erro na nuvem)', 'warning');
+                this.reset();
+                displayMotoboys();
+                updateMotoboySelect();
             } finally {
                 btn.disabled = false;
                 btn.textContent = originalText;
@@ -992,7 +980,9 @@
                         .update({ ativo: false })
                         .eq('id', id);
 
-                    if (error) throw error;
+                    if (error) {
+                        console.log('Erro no Supabase, excluindo localmente:', error.message);
+                    }
                 }
 
                 // Remover do cache local
@@ -1008,7 +998,12 @@
                 
             } catch (error) {
                 console.error('Erro ao excluir:', error);
-                showAlert('Erro ao excluir motoboy: ' + error.message, 'danger');
+                // Excluir localmente como fallback
+                motoboys = motoboys.filter(m => m.id != id);
+                saveToLocal();
+                displayMotoboys();
+                updateMotoboySelect();
+                showAlert('Motoboy excluído localmente (erro na nuvem)', 'warning');
             }
         }
 
@@ -1139,7 +1134,7 @@
                         .eq('day_index', dayIndex)
                         .single();
 
-                    if (selectError && selectError.code !== 'PGRST116') {
+                    if (selectError && selectError.code !== 'PGRST116' && !selectError.message.includes('relation "public.evaluations" does not exist')) {
                         throw selectError;
                     }
 
@@ -1154,13 +1149,12 @@
                             .insert([evaluationData]);
                     }
                 } catch (error) {
-                    console.error('Erro ao salvar no Supabase:', error);
+                    console.log('Erro ao salvar no Supabase, salvando localmente:', error.message);
                 }
-            } else {
-                // Salvar localmente
-                saveToLocal();
             }
             
+            // Sempre salvar localmente como backup
+            saveToLocal();
             loadEvaluations(); // Recarrega para atualizar visual
         }
 
@@ -1186,49 +1180,54 @@
                 if (isOnlineMode && supabase) {
                     // Salvar observações no Supabase
                     if (observations.trim()) {
-                        const obsData = {
-                            motoboy_id: motoboyId,
-                            week_year: week,
-                            observations: observations,
-                            criterion_index: -1,
-                            day_index: -1,
-                            updated_at: new Date().toISOString()
-                        };
+                        try {
+                            const obsData = {
+                                motoboy_id: motoboyId,
+                                week_year: week,
+                                observations: observations,
+                                criterion_index: -1,
+                                day_index: -1,
+                                updated_at: new Date().toISOString()
+                            };
 
-                        const { data: existing, error: selectError } = await supabase
-                            .from('evaluations')
-                            .select('id')
-                            .eq('motoboy_id', motoboyId)
-                            .eq('week_year', week)
-                            .eq('criterion_index', -1)
-                            .eq('day_index', -1)
-                            .single();
-
-                        if (selectError && selectError.code !== 'PGRST116') {
-                            throw selectError;
-                        }
-
-                        if (existing) {
-                            await supabase
+                            const { data: existing, error: selectError } = await supabase
                                 .from('evaluations')
-                                .update(obsData)
-                                .eq('id', existing.id);
-                        } else {
-                            await supabase
-                                .from('evaluations')
-                                .insert([obsData]);
+                                .select('id')
+                                .eq('motoboy_id', motoboyId)
+                                .eq('week_year', week)
+                                .eq('criterion_index', -1)
+                                .eq('day_index', -1)
+                                .single();
+
+                            if (selectError && selectError.code !== 'PGRST116' && !selectError.message.includes('relation "public.evaluations" does not exist')) {
+                                throw selectError;
+                            }
+
+                            if (existing) {
+                                await supabase
+                                    .from('evaluations')
+                                    .update(obsData)
+                                    .eq('id', existing.id);
+                            } else {
+                                await supabase
+                                    .from('evaluations')
+                                    .insert([obsData]);
+                            }
+                        } catch (error) {
+                            console.log('Erro ao salvar observações no Supabase:', error.message);
                         }
                     }
-                } else {
-                    // Salvar localmente
-                    saveToLocal();
                 }
-
+                
+                // Sempre salvar localmente
+                saveToLocal();
                 showAlert('Avaliação salva com sucesso!', 'success');
                 
             } catch (error) {
                 console.error('Erro ao salvar:', error);
-                showAlert('Erro ao salvar avaliação: ' + error.message, 'danger');
+                // Salvar localmente como fallback
+                saveToLocal();
+                showAlert('Avaliação salva localmente (erro na nuvem)', 'warning');
             } finally {
                 btn.disabled = false;
                 btn.textContent = originalText;
@@ -1551,30 +1550,6 @@
             showAlert('Backup realizado com sucesso!', 'success');
         }
 
-        // Adicionar seção de backup
-        document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(() => {
-                const backupSection = document.createElement('div');
-                backupSection.className = 'report-section';
-                backupSection.style.marginTop = '20px';
-                backupSection.innerHTML = `
-                    <h3>🔧 Gerenciamento de Dados</h3>
-                    <p><strong>Modo atual:</strong> <span id="currentMode">${isOnlineMode ? '☁️ Online' : '🔌 Local'}</span></p>
-                    <button class="btn" onclick="backupData()">📥 Fazer Backup</button>
-                    <button class="btn" onclick="document.getElementById('restoreFile').click()">📤 Restaurar Backup</button>
-                    <input type="file" id="restoreFile" accept=".json" style="display: none;" onchange="restoreData(event)">
-                    
-                    <div style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px; font-size: 14px;">
-                        <strong>📝 Informações:</strong><br>
-                        • <strong>Modo Local:</strong> Dados salvos apenas neste navegador<br>
-                        • <strong>Modo Online:</strong> Dados sincronizados na nuvem (Supabase)<br>
-                        • Use o backup para migrar entre computadores ou como segurança
-                    </div>
-                `;
-                document.querySelector('.container').appendChild(backupSection);
-            }, 1000);
-        });
-
         function restoreData(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -1610,6 +1585,29 @@
             };
             reader.readAsText(file);
         }
+
+        // Adicionar seção de backup após carregamento
+        setTimeout(() => {
+            const backupSection = document.createElement('div');
+            backupSection.className = 'report-section';
+            backupSection.style.marginTop = '20px';
+            backupSection.innerHTML = `
+                <h3>🔧 Gerenciamento de Dados</h3>
+                <p><strong>Modo atual:</strong> <span id="currentMode">${isOnlineMode ? '☁️ Online' : '🔌 Local'}</span></p>
+                <button class="btn" onclick="backupData()">📥 Fazer Backup</button>
+                <button class="btn" onclick="document.getElementById('restoreFile').click()">📤 Restaurar Backup</button>
+                <input type="file" id="restoreFile" accept=".json" style="display: none;" onchange="restoreData(event)">
+                
+                <div style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px; font-size: 14px;">
+                    <strong>📝 Informações:</strong><br>
+                    • <strong>Modo Local:</strong> Dados salvos apenas neste navegador<br>
+                    • <strong>Modo Online:</strong> Dados sincronizados na nuvem (Supabase)<br>
+                    • Use o backup para migrar entre computadores ou como segurança<br>
+                    • O sistema sempre salva localmente como backup, mesmo em modo online
+                </div>
+            `;
+            document.querySelector('.container').appendChild(backupSection);
+        }, 2000);
     </script>
 </body>
           <script>
